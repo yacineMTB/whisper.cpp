@@ -2,7 +2,6 @@ import { spawn } from 'child_process';
 // import { writeFileSync } from 'fs';
 // import { addWavByteHeaders } from './src/audioUtil';
 const audioProcess = spawn('bash', ['record_audio.sh']);
-import path from "path";
 // CPP addon; this is whisper
 const whisper = require('../../build/Release/whisper-addon');
 console.log(whisper.init('/Users/kache/Repos/whisper.cpp/models/ggml-tiny.bin'));
@@ -59,10 +58,12 @@ async function whisperLoop() {
         if (start < 0) start = 0;
         const audioSlice = conversation.getBuffer().slice(start, total_buffer_length);
 
-        let result = await whisper.fullDefault(audioSlice);
+        console.time('Inference Time');
+        let result = await whisper.whisperInferenceOnBytes(audioSlice);
+        console.timeEnd('Inference Time');
+
         conversation.addTranscription(start, result);
         if (conversation.transcriptions[conversation.transcriptions.length - 1]) {
-            console.clear();
             console.log(conversation.transcriptions[conversation.transcriptions.length - 1].text);
             // await infer(llama, `Here is some text from some audio. Come up with one extremely short thought, yet amusing, about what they're saying. 5 words only!. Audio so far: ${conversation.transcriptions[conversation.transcriptions.length - 1].text}`);
         }
