@@ -477,7 +477,7 @@ void high_pass_filter(std::vector<float> & data, float cutoff, float sample_rate
     }
 }
 
-bool vad_simple(std::vector<float> & pcmf32, int sample_rate, int last_ms, float vad_thold, float freq_thold, bool verbose) {
+bool vad_simple(std::vector<float> & pcmf32, int sample_rate, int last_ms, float vad_thold, float energy_thold, float freq_thold, bool verbose) {
     const int n_samples      = pcmf32.size();
     const int n_samples_last = (sample_rate * last_ms) / 1000;
 
@@ -508,6 +508,9 @@ bool vad_simple(std::vector<float> & pcmf32, int sample_rate, int last_ms, float
         fprintf(stderr, "%s: energy_all: %f, energy_last: %f, vad_thold: %f, freq_thold: %f\n", __func__, energy_all, energy_last, vad_thold, freq_thold);
     }
 
+    if (energy_all < energy_thold) {
+        return false;
+    }
     if (energy_last > vad_thold*energy_all) {
         return false;
     }

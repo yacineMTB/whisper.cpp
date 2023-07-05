@@ -118,6 +118,7 @@ bool vad_simple(
         int   sample_rate,
         int   last_ms,
         float vad_thold,
+        float energy_thold,
         float freq_thold,
         bool  verbose);
 
