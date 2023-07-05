@@ -1,4 +1,5 @@
 #include "whisper.h"
+#include "common.h"
 #include <napi.h>
 #include <mutex>
 #include <thread>
@@ -37,6 +38,21 @@ void Free(const Napi::CallbackInfo &info)
     }
 }
 
+// Convert int buffer to float32
+std::vector<float> cast_audio_buffer(void *data, size_t length)
+{
+    std::vector<float> pcmf32;
+    uint8_t *data_uint8 = static_cast<uint8_t *>(data);
+    size_t sample_count = length / sizeof(int16_t);
+    pcmf32.resize(sample_count);
+    for (size_t i = 0; i < sample_count; ++i)
+    {
+        int16_t sample = data_uint8[i * 2] | (data_uint8[i * 2 + 1] << 8);
+        pcmf32[i] = sample / static_cast<float>(INT16_MAX);
+    }
+    return pcmf32;
+}
+
 class WhisperAsyncWorker : public Napi::AsyncWorker {
 public:
     WhisperAsyncWorker(Napi::Env env, void *data, size_t length, Napi::Promise::Deferred deferred) : 
@@ -54,15 +70,7 @@ public:
         params.n_threads = std::min(8, (int)std::thread::hardware_concurrency());
         params.offset_ms = 0;
 
-        std::vector<float> pcmf32;
-        uint8_t *data_uint8 = static_cast<uint8_t *>(_data);
-        size_t sample_count = _length / sizeof(int16_t);
-        pcmf32.resize(sample_count);
-        for (size_t i = 0; i < sample_count; ++i)
-        {
-            int16_t sample = data_uint8[i * 2] | (data_uint8[i * 2 + 1] << 8);
-            pcmf32[i] = sample / static_cast<float>(INT16_MAX);
-        }
+        std::vector<float> pcmf32 = cast_audio_buffer(_data, _length);
         whisper_reset_timings(g_context);
         whisper_full(g_context, params, pcmf32.data(), pcmf32.size());
         _response = std::string(whisper_full_get_segment_text(g_context, 0));
@@ -101,6 +109,43 @@ Napi::Promise whisperInferenceOnBytes(const Napi::CallbackInfo &info) {
     worker->Queue();
 
     return deferred.Promise();
+}
+/**
+ *  VAD which triggers on changes in sound activity
+ *  Returns true if the user was speaking and is now finished
+ *
+ *  CallbackInfo arguments:
+ *    0: Audio buffer (Buffer)
+ *    1: Sample size in ms (int)
+ *    2: VAD multiplier. Lower is more sensitive (float)
+ *    3: Noise threshold (float)
+ */
+Napi::Boolean finishedVoiceActivity(const Napi::CallbackInfo &info) {
+    Napi::Env env = info.Env();
+    if (g_context == nullptr)
+    {
+        throw Napi::Error::New(env, "g_context is nullptr");
+    }
+
+    void *data;
+    int64_t last_ms_int;
+    double vad_thold_dbl;
+    double energy_thold_dbl;
+    size_t length;
+    float freq_thold = 100.0f;
+
+    napi_get_buffer_info(env, info[0], &data, &length);
+    std::vector<float> pcmf32 = cast_audio_buffer(data, length);
+    napi_get_value_int64(env, info[1], &last_ms_int);
+    size_t last_ms = static_cast<size_t>(last_ms_int);
+    napi_get_value_double(env, info[2], &vad_thold_dbl);
+    float vad_thold = static_cast<float>(vad_thold_dbl);
+    napi_get_value_double(env, info[3], &energy_thold_dbl);
+    float energy_thold = static_cast<float>(energy_thold_dbl);
+
+    bool finished = vad_simple(pcmf32, WHISPER_SAMPLE_RATE, last_ms, vad_thold, energy_thold, freq_thold, false);
+
+    return Napi::Boolean::New(env, finished);
 }
 
 
@@ -161,6 +206,7 @@ Napi::Object InitAddon(Napi::Env env, Napi::Object exports)
     exports.Set("init", Napi::Function::New(env, Init));
     exports.Set("free", Napi::Function::New(env, Free));
     exports.Set("whisperInferenceOnBytes", Napi::Function::New(env, whisperInferenceOnBytes));
+    exports.Set("finishedVoiceActivity", Napi::Function::New(env, finishedVoiceActivity));
     return exports;
 }
 
