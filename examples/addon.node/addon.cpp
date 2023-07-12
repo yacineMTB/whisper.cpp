@@ -69,6 +69,8 @@ public:
         params.language = "en";
         params.n_threads = std::min(8, (int)std::thread::hardware_concurrency());
         params.offset_ms = 0;
+        params.suppress_non_speech_tokens = true;
+        params.suppress_blank = true;
 
         std::vector<float> pcmf32 = cast_audio_buffer(_data, _length);
         whisper_reset_timings(g_context);
